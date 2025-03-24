@@ -6,6 +6,8 @@ GitHub Enterprise API와의 통합을 위한 MCP(Model Context Protocol) 서버�
 
 - GitHub Enterprise 인스턴스에 호스팅된 저장소 목록 조회
 - 저장소 세부 정보 조회
+- 저장소 브랜치 목록 조회
+- 파일 및 디렉토리 내용 조회
 - 엔터프라이즈 통계 정보 조회
 - 향상된 오류 처리 및 사용자 친화적인 응답 형식
 
@@ -56,6 +58,19 @@ node dist/index.js --transport http
 - `--debug`: 디버그 로깅 활성화
 - `--github-enterprise-url <URL>`: GitHub Enterprise API URL 설정
 - `--token <TOKEN>`: GitHub 개인 액세스 토큰 설정
+
+## 사용 가능한 MCP 도구
+
+이 MCP 서버는 다음과 같은 도구를 제공합니다:
+
+| 도구 이름 | 설명 | 매개변수 |
+|---|---|---|
+| `list-repositories` | 사용자 또는 조직의 저장소 목록 조회 | `owner`: 사용자/조직 이름<br>`isOrg`: 조직 여부<br>`type`: 저장소 유형<br>`sort`: 정렬 기준<br>`page`: 페이지 번호<br>`perPage`: 페이지당 항목 수 |
+| `get-repository` | 저장소 세부 정보 조회 | `owner`: 저장소 소유자<br>`repo`: 저장소 이름 |
+| `list-branches` | 저장소의 브랜치 목록 조회 | `owner`: 저장소 소유자<br>`repo`: 저장소 이름<br>`protected_only`: 보호된 브랜치만 표시 여부<br>`page`: 페이지 번호<br>`perPage`: 페이지당 항목 수 |
+| `get-content` | 파일 또는 디렉토리 내용 조회 | `owner`: 저장소 소유자<br>`repo`: 저장소 이름<br>`path`: 파일/디렉토리 경로<br>`ref`: 브랜치/커밋 (옵션) |
+| `get-license-info` | GitHub Enterprise 라이센스 정보 조회 | - |
+| `get-enterprise-stats` | GitHub Enterprise 시스템 통계 조회 | - |
 
 ## API 개선 사항
 
