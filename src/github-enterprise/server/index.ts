@@ -52,6 +52,55 @@ function formatRepository(repo: any) {
 }
 
 /**
+ * 브랜치 정보를 사용자 친화적 형식으로 변환
+ */
+function formatBranch(branch: any) {
+  return {
+    name: branch.name,
+    commit: {
+      sha: branch.commit.sha
+    },
+    protected: branch.protected
+  };
+}
+
+/**
+ * 파일 내용을 사용자 친화적 형식으로 변환
+ */
+function formatContent(content: any) {
+  // 디렉토리인 경우 (배열)
+  if (Array.isArray(content)) {
+    return content.map(item => ({
+      name: item.name,
+      path: item.path,
+      type: item.type,
+      size: item.size,
+      url: item.html_url
+    }));
+  }
+  
+  // 파일인 경우 (단일 객체)
+  const result: any = {
+    name: content.name,
+    path: content.path,
+    type: content.type,
+    size: content.size,
+    url: content.html_url
+  };
+  
+  // 파일 내용이 있으면 디코딩
+  if (content.content && content.encoding === 'base64') {
+    try {
+      result.content = Buffer.from(content.content, 'base64').toString('utf-8');
+    } catch (e) {
+      result.content = '파일 내용을 디코딩할 수 없습니다.';
+    }
+  }
+  
+  return result;
+}
+
+/**
  * GitHub Enterprise MCP 서버 생성 및 시작
  */
 export async function startServer(options: GitHubServerOptions = {}): Promise<void> {
@@ -217,6 +266,171 @@ export async function startServer(options: GitHubServerOptions = {}): Promise<vo
             {
               type: "text",
               text: `저장소 정보 조회 중 오류가 발생했습니다: ${error.message}`
+            }
+          ],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // 브랜치 목록 조회 도구
+  server.tool(
+    "list-branches",
+    {
+      owner: z.string().describe("저장소 소유자 (사용자 또는 조직)"),
+      repo: z.string().describe("저장소 이름"),
+      protected_only: z.boolean().default(false).describe("보호된 브랜치만 표시할지 여부"),
+      page: z.number().default(1).describe("페이지 번호"),
+      perPage: z.number().default(30).describe("페이지당 항목 수")
+    },
+    async ({ owner, repo, protected_only, page, perPage }) => {
+      try {
+        // 매개변수 검증
+        if (!owner || typeof owner !== 'string' || owner.trim() === '') {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "오류: 저장소 소유자(owner)는 필수 항목입니다."
+              }
+            ],
+            isError: true
+          };
+        }
+
+        if (!repo || typeof repo !== 'string' || repo.trim() === '') {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "오류: 저장소 이름(repo)은 필수 항목입니다."
+              }
+            ],
+            isError: true
+          };
+        }
+
+        const branches = await context.repository.listBranches(
+          owner, 
+          repo, 
+          protected_only as boolean, 
+          page as number, 
+          perPage as number
+        );
+        
+        // 브랜치가 없는 경우
+        if (!branches || branches.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `저장소 '${owner}/${repo}'에 브랜치가 없습니다.`
+              }
+            ]
+          };
+        }
+        
+        // 브랜치 정보 형식화
+        const formattedBranches = branches.map(formatBranch);
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `저장소 '${owner}/${repo}'의 브랜치 목록 (${branches.length}개)${protected_only ? ' (보호된 브랜치만)' : ''}:\n\n${JSON.stringify(formattedBranches, null, 2)}`
+            }
+          ]
+        };
+      } catch (error: any) {
+        console.error('브랜치 목록 조회 오류:', error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `브랜치 목록 조회 중 오류가 발생했습니다: ${error.message}`
+            }
+          ],
+          isError: true
+        };
+      }
+    }
+  );
+
+  // 파일 내용 조회 도구
+  server.tool(
+    "get-content",
+    {
+      owner: z.string().describe("저장소 소유자 (사용자 또는 조직)"),
+      repo: z.string().describe("저장소 이름"),
+      path: z.string().describe("파일 또는 디렉토리 경로"),
+      ref: z.string().optional().describe("브랜치 또는 커밋 해시 (기본값: 기본 브랜치)")
+    },
+    async ({ owner, repo, path, ref }) => {
+      try {
+        // 매개변수 검증
+        if (!owner || typeof owner !== 'string' || owner.trim() === '') {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "오류: 저장소 소유자(owner)는 필수 항목입니다."
+              }
+            ],
+            isError: true
+          };
+        }
+
+        if (!repo || typeof repo !== 'string' || repo.trim() === '') {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "오류: 저장소 이름(repo)은 필수 항목입니다."
+              }
+            ],
+            isError: true
+          };
+        }
+
+        if (!path || typeof path !== 'string') {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "오류: 파일 또는 디렉토리 경로(path)는 필수 항목입니다."
+              }
+            ],
+            isError: true
+          };
+        }
+
+        const content = await context.repository.getContent(owner, repo, path, ref);
+        
+        // 내용 형식화
+        const formattedContent = formatContent(content);
+        
+        // 디렉토리인지 파일인지에 따라 다른 응답 메시지
+        const isDirectory = Array.isArray(content);
+        const responseText = isDirectory
+          ? `디렉토리 '${path}'의 내용 (${(formattedContent as any[]).length}개 항목):`
+          : `파일 '${path}'의 내용:`;
+        
+        return {
+          content: [
+            {
+              type: "text",
+              text: `저장소 '${owner}/${repo}'의 ${responseText}\n\n${JSON.stringify(formattedContent, null, 2)}`
+            }
+          ]
+        };
+      } catch (error: any) {
+        console.error('파일/디렉토리 내용 조회 오류:', error);
+        return {
+          content: [
+            {
+              type: "text",
+              text: `파일/디렉토리 내용 조회 중 오류가 발생했습니다: ${error.message}`
             }
           ],
           isError: true
