@@ -1,4 +1,4 @@
-import fetch, { Response } from 'node-fetch';
+import axios, { AxiosResponse } from 'axios';
 import { getUserAgent } from 'universal-user-agent';
 import { Config, buildApiUrl } from './config.js';
 
@@ -60,9 +60,8 @@ export class GitHubClient {
     }
 
     // 요청 바디 처리
-    let body: string | undefined;
-    if (options.body && ['POST', 'PUT', 'PATCH'].includes(method)) {
-      body = JSON.stringify(options.body);
+    let data = options.body;
+    if (data && ['POST', 'PUT', 'PATCH'].includes(method)) {
       headers['Content-Type'] = 'application/json';
     }
 
@@ -70,75 +69,51 @@ export class GitHubClient {
     if (this.config.debug) {
       console.log(`[GitHub API] ${method} ${urlWithParams}`);
       console.log(`[GitHub API] 베이스 URL: ${this.config.baseUrl}`);
-      if (body) console.log(`[GitHub API] Request body: ${body}`);
+      if (data) console.log(`[GitHub API] Request body: ${JSON.stringify(data)}`);
     }
 
-    // AbortController 설정 (타임아웃용)
-    const controller = new AbortController();
+    // 타임아웃 설정
     const timeout = options.timeout || this.config.timeout;
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
 
     // 요청 실행
-    let response: Response;
     try {
-      response = await fetch(urlWithParams, {
-        method,
+      const response = await axios({
+        method: method.toLowerCase(),
+        url: urlWithParams,
         headers,
-        body,
-        signal: controller.signal
+        data,
+        timeout
       });
 
-      // 타임아웃 해제
-      clearTimeout(timeoutId);
-
-      // 응답 상태 확인
-      if (!response.ok) {
-        let errorData: any;
-        let errorMessage = `GitHub API 오류: ${response.status} ${response.statusText}`;
-
-        try {
-          // JSON 응답이면 파싱
-          const contentType = response.headers.get('content-type');
-          if (contentType && contentType.includes('application/json')) {
-            errorData = await response.json();
-            if (errorData && errorData.message) {
-              errorMessage = `GitHub API 오류: ${errorData.message} (${response.status})`;
-            }
-          }
-        } catch (e) {
-          // JSON 파싱 오류 무시
+      return response.data as T;
+    } catch (error: any) {
+      if (axios.isAxiosError(error)) {
+        // 타임아웃 오류 처리
+        if (error.code === 'ECONNABORTED') {
+          throw new GitHubError(
+            `GitHub API 요청 타임아웃: 요청이 ${timeout}ms 내에 완료되지 않았습니다.`,
+            408
+          );
         }
 
+        const status = error.response?.status || 0;
+        let errorData = error.response?.data;
+        let errorMessage = `GitHub API 오류: ${status} ${error.message}`;
+
         // 특정 오류 코드에 대한 사용자 친화적 메시지
-        if (response.status === 401) {
+        if (status === 401) {
           errorMessage = 'GitHub API 인증 오류: 인증 토큰이 유효하지 않거나 만료되었습니다.';
-        } else if (response.status === 403) {
+        } else if (status === 403) {
           errorMessage = 'GitHub API 접근 거부: 이 작업을 수행할 권한이 없습니다.';
-        } else if (response.status === 404) {
+        } else if (status === 404) {
           errorMessage = `GitHub API 리소스를 찾을 수 없음: ${path}`;
-        } else if (response.status === 422) {
+        } else if (status === 422) {
           errorMessage = 'GitHub API 검증 오류: 요청 데이터가 올바르지 않습니다.';
-        } else if (response.status >= 500) {
+        } else if (status >= 500) {
           errorMessage = 'GitHub API 서버 오류: 잠시 후 다시 시도하세요.';
         }
 
-        throw new GitHubError(errorMessage, response.status, errorData);
-      }
-    } catch (error: any) {
-      // 타임아웃 해제
-      clearTimeout(timeoutId);
-
-      // 타임아웃 오류 처리
-      if (error.name === 'AbortError') {
-        throw new GitHubError(
-          `GitHub API 요청 타임아웃: 요청이 ${timeout}ms 내에 완료되지 않았습니다.`,
-          408
-        );
-      }
-      
-      // GitHubError는 그대로 다시 throw
-      if (error instanceof GitHubError) {
-        throw error;
+        throw new GitHubError(errorMessage, status, errorData);
       }
 
       // 기타 네트워크 오류
@@ -147,18 +122,6 @@ export class GitHubClient {
         0
       );
     }
-
-    // 응답 처리
-    let data: any;
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      data = await response.json();
-    } else {
-      data = await response.text();
-    }
-
-    // 성공 응답 반환
-    return data as T;
   }
 
   /**
